@@ -15,25 +15,89 @@ def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
         raise RuntimeError(f'{label}: expected exactly one match, got {n}')
     return out
 
-# Application.cpp: keep all feature/state/timing logic, but make the single
-# application-wide injection boundary a no-op simulator sink.
+# Application.cpp: preserve original feature/state/timing behavior and allow
+# standard Windows SendInput only while the foreground process is notepad.exe.
+# No driver injection, process injection, key suppression, or anti-cheat bypass.
 app = read('Application.cpp')
+if '#include <cwchar>' not in app:
+    app = app.replace('#include <memory>\n', '#include <cwchar>\n#include <memory>\n', 1)
 app = sub_once(
     app,
     r'bool InjectKeys\(const int \*keys, std::size_t count, bool keyDown\) noexcept \{.*?\n\}\n\nbool InjectKey\(int vk, bool keyDown\) noexcept \{.*?\n\}',
-    '''bool InjectKeys(const int *keys, std::size_t count, bool keyDown) noexcept {
-  // SAFE EDITION: feature/timing logic may execute, but no keyboard event is
-  // synthesized into Windows or another application.
-  (void)keys;
-  (void)count;
-  (void)keyDown;
-  return true;
+    '''bool ForegroundIsNotepad() noexcept {
+  HWND foreground = GetForegroundWindow();
+  if (!foreground) {
+    return false;
+  }
+
+  DWORD processId = 0;
+  GetWindowThreadProcessId(foreground, &processId);
+  if (processId == 0) {
+    return false;
+  }
+
+  HANDLE process =
+      OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+  if (!process) {
+    return false;
+  }
+
+  wchar_t imagePath[32768]{};
+  DWORD imagePathLength =
+      static_cast<DWORD>(sizeof(imagePath) / sizeof(imagePath[0]));
+  const bool queried =
+      QueryFullProcessImageNameW(process, 0, imagePath, &imagePathLength) != 0;
+  CloseHandle(process);
+  if (!queried) {
+    return false;
+  }
+
+  const wchar_t *fileName = std::wcsrchr(imagePath, L'\\\\');
+  fileName = fileName ? fileName + 1 : imagePath;
+  return _wcsicmp(fileName, L"notepad.exe") == 0;
+}
+
+bool InjectKeys(const int *keys, std::size_t count, bool keyDown) noexcept {
+  if (!keys || count == 0) {
+    return true;
+  }
+
+  if (!ForegroundIsNotepad()) {
+    return true;
+  }
+
+  bool allInjected = true;
+  for (std::size_t i = 0; i < count; ++i) {
+    const UINT mapped =
+        MapVirtualKeyW(static_cast<UINT>(keys[i]), MAPVK_VK_TO_VSC_EX);
+    if (mapped == 0) {
+      allInjected = false;
+      continue;
+    }
+
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = 0;
+    input.ki.wScan = static_cast<WORD>(mapped & 0xFFu);
+    input.ki.dwFlags = KEYEVENTF_SCANCODE;
+    if ((mapped & 0xFF00u) == 0xE000u) {
+      input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    if (!keyDown) {
+      input.ki.dwFlags |= KEYEVENTF_KEYUP;
+    }
+    input.ki.dwExtraInfo = NEO_SYNTHETIC_INFORMATION;
+
+    if (SendInput(1, &input, sizeof(INPUT)) != 1) {
+      allInjected = false;
+      ReportInjectionFailure();
+    }
+  }
+  return allInjected;
 }
 
 bool InjectKey(int vk, bool keyDown) noexcept {
-  (void)vk;
-  (void)keyDown;
-  return true;
+  return InjectKeys(&vk, 1, keyDown);
 }''',
     'Application injection boundary',
 )
@@ -116,16 +180,16 @@ gui = sub_once(
     const ImVec4 safeColor(0.25f, 0.85f, 0.25f, 1.0f);
     ImGui::TextColored(safeColor, "[  OK  ]");
     ImGui::SameLine();
-    ImGui::TextColored(safeColor, "Safe monitor backend ready");
+    ImGui::TextColored(safeColor, "Notepad test injection ready");
     ImGui::Spacing();
 
     int backend = 0;
-    ImGui::RadioButton("WinHook (default)", &backend, 0);
+    ImGui::RadioButton("WinHook + Notepad test", &backend, 0);
     ImGui::SameLine();
     ImGui::BeginDisabled();
     ImGui::RadioButton("Interception", &backend, 1);
     ImGui::EndDisabled();
-    ImGui::TextDisabled("  Safe Edition: Interception and input injection are disabled.");
+    ImGui::TextDisabled("  Injection works only while foreground app is notepad.exe; Interception is disabled.");
   }
 
   ImGui::PopStyleVar(2);''',
@@ -156,15 +220,20 @@ for token in ('LoadLibrary', 'interception_send', 'interception_create_context')
 if 'LoadLibraryExW(availableDllPath' in checks['gui/GuiManager.cpp']:
     raise RuntimeError('GuiManager.cpp: Interception driver probing remains')
 
-# Scan every C++ translation unit in the pinned source tree, not just the files
-# changed above. Comments containing the word SendInput are harmless; calls are not.
-for cpp in root.rglob('*.cpp'):
-    text = cpp.read_text(encoding='utf-8-sig')
-    if 'SendInput(' in text:
-        raise RuntimeError(f'{cpp.relative_to(root)}: SendInput call remains after safe patch')
+# Validate that SendInput exists only at the Notepad-gated application boundary.
+app_after = checks['Application.cpp']
+for token in ('SendInput(', 'GetForegroundWindow()', 'notepad.exe'):
+    if token not in app_after:
+        raise RuntimeError(f'Application.cpp: missing Notepad-only injection guard token: {token}')
 
-print('Safe patch validated successfully.')
+for cpp in root.rglob('*.cpp'):
+    rel = str(cpp.relative_to(root)).replace('\\\\', '/')
+    text = cpp.read_text(encoding='utf-8-sig')
+    if rel != 'Application.cpp' and 'SendInput(' in text:
+        raise RuntimeError(f'{rel}: unexpected SendInput call remains after patch')
+
+print('Notepad-test patch validated successfully.')
 print(' - Original ImGui/DX11 UI and feature/state logic retained')
-print(' - SendInput removed from active backends')
+print(' - Standard SendInput enabled only for foreground notepad.exe')
 print(' - Physical keyboard suppression disabled')
 print(' - Interception driver backend/probing disabled')
