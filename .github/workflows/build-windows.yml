@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build StrafeHelper Safe
 
 on:
   workflow_dispatch:
@@ -14,19 +14,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch original StrafeHelper UI/source
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/fL0P1337/StrafeHelper.git upstream
+
+      - name: Apply safe backend patch
+        shell: pwsh
+        run: ./safe-patch.ps1
+
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Build x64 Release
-        shell: cmd
+      - name: Build original UI with safe backend
+        shell: pwsh
+        run: msbuild upstream/StrafeHelper.vcxproj /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Locate EXE
+        shell: pwsh
         run: |
-          cl /nologo /std:c++20 /O2 /EHsc /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN main.cpp /Fe:StrafeHelper.exe /link user32.lib gdi32.lib
+          $exe = Get-ChildItem upstream -Recurse -Filter StrafeHelper.exe | Select-Object -First 1
+          if (-not $exe) { throw "StrafeHelper.exe not found" }
+          Copy-Item $exe.FullName ./StrafeHelper.exe
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: StrafeHelper-Windows-x64
+          name: StrafeHelper-Safe-Windows-x64
           path: StrafeHelper.exe
           if-no-files-found: error
