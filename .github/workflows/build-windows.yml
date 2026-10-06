@@ -11,37 +11,54 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout safe build files
+        uses: actions/checkout@v4
 
-      - name: Fetch original StrafeHelper UI/source
-        shell: pwsh
-        run: git clone --depth 1 https://github.com/fL0P1337/StrafeHelper.git upstream
-
-      - name: Apply safe backend patch
+      - name: Fetch exact original StrafeHelper source
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\\safe-patch.ps1"
+          git clone https://github.com/fL0P1337/StrafeHelper.git upstream
+          git -C upstream checkout --detach 6da4c6238042a572ad18e78b752d18dc3f0c51f4
 
-      - name: Set up MSVC
+      - name: Apply and validate safe backend patch
+        shell: pwsh
+        run: |
+          python "$env:GITHUB_WORKSPACE\safe-patch.py" "$env:GITHUB_WORKSPACE\upstream"
+
+      - name: Set up MSVC x64
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Build original UI with safe backend
-        shell: pwsh
-        run: msbuild upstream/StrafeHelper.vcxproj /m /p:Configuration=Release /p:Platform=x64
-
-      - name: Locate EXE
+      - name: Build Release x64
         shell: pwsh
         run: |
-          $exe = Get-ChildItem upstream -Recurse -Filter StrafeHelper.exe | Select-Object -First 1
-          if (-not $exe) { throw "StrafeHelper.exe not found" }
-          Copy-Item $exe.FullName ./StrafeHelper.exe
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          msbuild "$env:GITHUB_WORKSPACE\upstream\StrafeHelper.vcxproj" /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$env:GITHUB_WORKSPACE\dist\"
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\dist\StrafeHelper.exe")) {
+            throw "Build completed without producing dist\StrafeHelper.exe"
+          }
 
-      - name: Upload EXE
+      - name: Verify final EXE safety boundary
+        shell: pwsh
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE\dist\StrafeHelper.exe"
+          $imports = (& dumpbin /imports $exe | Out-String)
+          if ($imports -match '\bSendInput\b') {
+            throw "Safety verification failed: final EXE imports SendInput"
+          }
+          if ($imports -match '(?i)interception(64)?\.dll') {
+            throw "Safety verification failed: final EXE imports Interception DLL"
+          }
+          Write-Host "Final EXE verified: no SendInput import and no Interception DLL import."
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+
+      - name: Upload ready EXE
         uses: actions/upload-artifact@v4
         with:
           name: StrafeHelper-Safe-Windows-x64
-          path: StrafeHelper.exe
+          path: dist/StrafeHelper.exe
           if-no-files-found: error
+          retention-days: 30
