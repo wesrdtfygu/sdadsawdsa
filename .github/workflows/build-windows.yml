@@ -35,16 +35,22 @@ jobs:
       - name: Build Release x64
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
-          msbuild "$env:GITHUB_WORKSPACE\upstream\StrafeHelper.vcxproj" /m /p:Configuration=Release /p:Platform=x64 /p:OutDir="$env:GITHUB_WORKSPACE\dist\"
-          if (-not (Test-Path "$env:GITHUB_WORKSPACE\dist\StrafeHelper.exe")) {
-            throw "Build completed without producing dist\StrafeHelper.exe"
+          msbuild "$env:GITHUB_WORKSPACE\upstream\StrafeHelper.vcxproj" /m /p:Configuration=Release /p:Platform=x64
+          $exe = Get-ChildItem "$env:GITHUB_WORKSPACE\upstream" -Recurse -Filter "StrafeHelper.exe" -File |
+            Where-Object { $_.FullName -match "Release" } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $exe) {
+            throw "MSBuild completed without producing StrafeHelper.exe"
           }
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          Copy-Item $exe.FullName "$env:GITHUB_WORKSPACE\dist\StrafeHelper.exe" -Force
 
       - name: Verify final EXE safety boundary
         shell: pwsh
         run: |
           $exe = "$env:GITHUB_WORKSPACE\dist\StrafeHelper.exe"
+          if (-not (Test-Path $exe)) { throw "Final EXE is missing" }
           $imports = (& dumpbin /imports $exe | Out-String)
           if ($imports -match '\bSendInput\b') {
             throw "Safety verification failed: final EXE imports SendInput"
