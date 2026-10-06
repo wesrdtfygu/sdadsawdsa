@@ -10,7 +10,9 @@ def write(rel: str, text: str) -> None:
     (root / rel).write_text(text, encoding='utf-8', newline='\n')
 
 def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
-    out, n = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    # Use a callable replacement so backslashes in generated C++ are not
+    # interpreted a second time by Python's regex replacement engine.
+    out, n = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S)
     if n != 1:
         raise RuntimeError(f'{label}: expected exactly one match, got {n}')
     return out
@@ -225,6 +227,10 @@ app_after = checks['Application.cpp']
 for token in ('SendInput(', 'GetForegroundWindow()', 'notepad.exe'):
     if token not in app_after:
         raise RuntimeError(f'Application.cpp: missing Notepad-only injection guard token: {token}')
+
+# Ensure the generated C++ contains a valid wide-character backslash literal.
+if "std::wcsrchr(imagePath, L'\\\\');" not in app_after:
+    raise RuntimeError("Application.cpp: malformed backslash literal in Notepad process-path check")
 
 for cpp in root.rglob('*.cpp'):
     rel = str(cpp.relative_to(root)).replace('\\\\', '/')
