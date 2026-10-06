@@ -1,4 +1,4 @@
-name: Build StrafeHelper Safe
+name: Build StrafeHelper Notepad Test
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
           git clone https://github.com/fL0P1337/StrafeHelper.git upstream
           git -C upstream checkout --detach 6da4c6238042a572ad18e78b752d18dc3f0c51f4
 
-      - name: Apply and validate safe backend patch
+      - name: Apply and validate Notepad-only injection patch
         shell: pwsh
         run: |
           python "$env:GITHUB_WORKSPACE\safe-patch.py" "$env:GITHUB_WORKSPACE\upstream"
@@ -72,20 +72,26 @@ jobs:
 
           $imports = (& "$env:DUMPBIN" /imports $exe | Out-String)
           if ($LASTEXITCODE -ne 0) { throw "dumpbin failed with exit code $LASTEXITCODE" }
-          if ($imports -match '\bSendInput\b') {
-            throw "Safety verification failed: final EXE imports SendInput"
+          if ($imports -notmatch '\bSendInput\b') {
+            throw "Verification failed: expected standard Windows SendInput import was not found"
           }
           if ($imports -match '(?i)interception(64)?\.dll') {
             throw "Safety verification failed: final EXE imports Interception DLL"
           }
 
-          Write-Host "Final EXE verified: no SendInput import and no Interception DLL import."
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          $utf16 = [System.Text.Encoding]::Unicode.GetString($bytes)
+          if ($utf16 -notmatch '(?i)notepad\.exe') {
+            throw "Safety verification failed: compiled notepad.exe foreground restriction not found"
+          }
+
+          Write-Host "Final EXE verified: SendInput present, notepad.exe restriction present, no Interception DLL import."
           Get-Item $exe | Format-List Name,Length,LastWriteTime
 
       - name: Upload ready EXE
         uses: actions/upload-artifact@v4
         with:
-          name: StrafeHelper-Safe-Windows-x64
+          name: StrafeHelper-NotepadTest-Windows-x64
           path: dist/StrafeHelper.exe
           if-no-files-found: error
           retention-days: 30
