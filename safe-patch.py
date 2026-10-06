@@ -148,9 +148,6 @@ checks = {
     'InterceptionBackend.cpp': read('InterceptionBackend.cpp'),
     'gui/GuiManager.cpp': read('gui/GuiManager.cpp'),
 }
-for rel, text in checks.items():
-    if 'SendInput(' in text:
-        raise RuntimeError(f'{rel}: SendInput remains after safe patch')
 if 'return 1; // Suppress event' in checks['KbdHookBackend.cpp']:
     raise RuntimeError('KbdHookBackend.cpp: physical-key suppression remains')
 for token in ('LoadLibrary', 'interception_send', 'interception_create_context'):
@@ -158,6 +155,13 @@ for token in ('LoadLibrary', 'interception_send', 'interception_create_context')
         raise RuntimeError(f'InterceptionBackend.cpp: unsafe driver token remains: {token}')
 if 'LoadLibraryExW(availableDllPath' in checks['gui/GuiManager.cpp']:
     raise RuntimeError('GuiManager.cpp: Interception driver probing remains')
+
+# Scan every C++ translation unit in the pinned source tree, not just the files
+# changed above. Comments containing the word SendInput are harmless; calls are not.
+for cpp in root.rglob('*.cpp'):
+    text = cpp.read_text(encoding='utf-8-sig')
+    if 'SendInput(' in text:
+        raise RuntimeError(f'{cpp.relative_to(root)}: SendInput call remains after safe patch')
 
 print('Safe patch validated successfully.')
 print(' - Original ImGui/DX11 UI and feature/state logic retained')
