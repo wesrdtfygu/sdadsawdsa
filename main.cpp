@@ -88,21 +88,25 @@ static void Box(HDC d,int x,int y,int w,int h,const wchar_t* t,bool on){
     Rectangle(d,x,y,x+w,y+h); std::wstring s=on?L"[x] ":L"[ ] ";s+=t;Txt(d,x+10,y+9,s);
 }
 static void DrawConfig(HDC d){
-    Txt(d,30,90,L"Features");
-    Box(d,30,120,260,38,L"Lurch Strafing",cfg.lurch);
-    Box(d,30,165,260,38,L"SnapTap / SOCD",cfg.socd);
-    Box(d,30,210,260,38,L"Turbo Loot",cfg.turboLoot);
-    Box(d,30,255,260,38,L"Turbo Jump",cfg.turboJump);
-    Box(d,30,300,260,38,L"Superglide",cfg.superglide);
-    Txt(d,330,90,L"Timing");
-    std::wostringstream a;a<<L"Lurch delay: "<<cfg.lurchDelay<<L" ms   [-] [+]";Txt(d,330,125,a.str());
-    std::wostringstream b;b<<L"Lurch hold:  "<<cfg.lurchHold<<L" ms   [-] [+]";Txt(d,330,165,b.str());
-    std::wostringstream c;c<<L"Loot repeat: "<<cfg.lootDelay<<L" ms";Txt(d,330,205,c.str());
-    std::wostringstream e;e<<L"Jump repeat: "<<cfg.jumpDelay<<L" ms";Txt(d,330,245,e.str());
-    std::wostringstream q;q<<L"Target FPS: "<<cfg.fps;Txt(d,330,285,q.str());
-    Rectangle(d,330,320,465,355);Txt(d,350,330,L"Save Config");
-    Txt(d,30,380,L"Safe backend: physical-key monitor + local simulation only.");
-    Txt(d,30,405,L"No SendInput, key suppression, Interception driver, or game injection.");
+    Txt(d,15,68,L"Features");
+    MoveToEx(d,15,87,nullptr);LineTo(d,405,87);
+    Box(d,15,92,17,17,L"",cfg.lurch); Txt(d,38,96,L"Enable Lurch Strafing");
+    Box(d,15,115,17,17,L"",cfg.socd); Txt(d,38,119,L"Enable SnapTap (SOCD)");
+
+    Txt(d,15,145,L"Turbo Functions");
+    MoveToEx(d,15,163,nullptr);LineTo(d,405,163);
+    Box(d,15,169,17,17,L"",cfg.turboLoot); Txt(d,38,173,L"Enable Turbo Loot");
+    Box(d,15,192,17,17,L"",cfg.turboJump); Txt(d,38,196,L"Enable Turbo Jump");
+
+    Txt(d,15,222,L"Superglide");
+    MoveToEx(d,15,240,nullptr);LineTo(d,405,240);
+    Box(d,15,246,17,17,L"",cfg.superglide); Txt(d,38,250,L"Enable Superglide");
+
+    Txt(d,15,278,L"Input Backend");
+    MoveToEx(d,15,295,nullptr);LineTo(d,405,295);
+    SetTextColor(d,RGB(65,255,75)); Txt(d,15,305,L"[ OK ]  Safe simulator ready"); SetTextColor(d,RGB(215,215,220));
+    Ellipse(d,18,331,37,350); Txt(d,42,334,L"WinHook (safe monitor)");
+    Ellipse(d,160,331,179,350); Txt(d,184,334,L"Interception (disabled)");
 }
 static std::wstring Yn(bool b){return b?L"DOWN":L"up";}
 static void DrawMonitor(HDC d){
@@ -121,21 +125,24 @@ static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_TIMER: Tick();InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_LBUTTONDOWN:{
         int x=GET_X_LPARAM(l),y=GET_Y_LPARAM(l);
-        if(y>=48&&y<=78){if(x<180)st.tab=0;else if(x<360)st.tab=1;else st.tab=2;InvalidateRect(h,nullptr,TRUE);return 0;}
+        if(y>=15&&y<=52){if(x<240&&x>=160)st.tab=0;else if(x<330&&x>=240)st.tab=1;else if(x>=330)st.tab=2;InvalidateRect(h,nullptr,TRUE);return 0;}
         if(st.tab==0){
-            if(x>=30&&x<=290){if(y>=120&&y<=158)cfg.lurch=!cfg.lurch;else if(y>=165&&y<=203)cfg.socd=!cfg.socd;
-            else if(y>=210&&y<=248)cfg.turboLoot=!cfg.turboLoot;else if(y>=255&&y<=293)cfg.turboJump=!cfg.turboJump;
-            else if(y>=300&&y<=338)cfg.superglide=!cfg.superglide;}
-            if(x>=330&&x<=465&&y>=320&&y<=355)Save();
-            if(y>=112&&y<=145){if(x>=510&&x<550)cfg.lurchDelay=std::max(1,cfg.lurchDelay-1);if(x>=550)cfg.lurchDelay++;}
-            if(y>=150&&y<=185){if(x>=510&&x<550)cfg.lurchHold=std::max(1,cfg.lurchHold-1);if(x>=550)cfg.lurchHold++;}
+            if(x>=15&&x<=310){
+                if(y>=92&&y<=109)cfg.lurch=!cfg.lurch;
+                else if(y>=115&&y<=132)cfg.socd=!cfg.socd;
+                else if(y>=169&&y<=186)cfg.turboLoot=!cfg.turboLoot;
+                else if(y>=192&&y<=209)cfg.turboJump=!cfg.turboJump;
+                else if(y>=246&&y<=263)cfg.superglide=!cfg.superglide;
+            }
             InvalidateRect(h,nullptr,TRUE);
         } return 0;}
     case WM_PAINT:{PAINTSTRUCT p{};HDC d=BeginPaint(h,&p);SetBkMode(d,TRANSPARENT);
         HFONT font=CreateFontW(18,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,0,DEFAULT_PITCH,L"Segoe UI");auto old=SelectObject(d,font);
-        Txt(d,30,18,L"StrafeHelper  |  SAFE EDITION");
-        Rectangle(d,20,45,180,80);Txt(d,65,56,L"Config");Rectangle(d,180,45,360,80);Txt(d,215,56,L"State Monitor");
-        Rectangle(d,360,45,520,80);Txt(d,405,56,L"Console");
+        SetTextColor(d,RGB(215,215,220));
+        Txt(d,50,20,L"StrafeHelper");
+        Ellipse(d,24,18,42,36); MoveToEx(d,24,31,nullptr);LineTo(d,42,31);
+        Txt(d,180,29,L"Config"); SetTextColor(d,RGB(125,125,130));Txt(d,260,29,L"Monitor");Txt(d,340,29,L"Console");
+        SetTextColor(d,RGB(215,215,220));
         if(st.tab==0)DrawConfig(d);else if(st.tab==1)DrawMonitor(d);else DrawConsole(d);
         SelectObject(d,old);DeleteObject(font);EndPaint(h,&p);return 0;}
     case WM_DESTROY:Save();PostQuitMessage(0);return 0;}
@@ -143,8 +150,8 @@ static LRESULT CALLBACK Proc(HWND h,UINT m,WPARAM w,LPARAM l){
 }
 int WINAPI wWinMain(HINSTANCE i,HINSTANCE,PWSTR,int n){
     Load();WNDCLASSW c{};c.lpfnWndProc=Proc;c.hInstance=i;c.lpszClassName=L"StrafeHelperSafe";
-    c.hCursor=LoadCursor(nullptr,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);RegisterClassW(&c);
-    gWnd=CreateWindowExW(0,c.lpszClassName,L"StrafeHelper - Safe Edition",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,
-        CW_USEDEFAULT,CW_USEDEFAULT,760,510,nullptr,nullptr,i,nullptr);if(!gWnd)return 1;ShowWindow(gWnd,n);
+    c.hCursor=LoadCursor(nullptr,IDC_ARROW);c.hbrBackground=CreateSolidBrush(RGB(20,20,25));RegisterClassW(&c);
+    gWnd=CreateWindowExW(0,c.lpszClassName,L"StrafeHelper",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,
+        CW_USEDEFAULT,CW_USEDEFAULT,435,420,nullptr,nullptr,i,nullptr);if(!gWnd)return 1;ShowWindow(gWnd,n);
     MSG m{};while(GetMessageW(&m,nullptr,0,0)>0){TranslateMessage(&m);DispatchMessageW(&m);}return(int)m.wParam;
 }
