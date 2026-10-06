@@ -1,0 +1,12 @@
+out/
+.vs/
+*.user
+*.suo
+*.VC.db
+*.pdb
+*.ilk
+Debug/
+Release/
+x64/
+*.exe
+*.dll
