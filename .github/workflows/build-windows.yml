@@ -27,33 +27,26 @@ jobs:
         run: |
           python "$env:GITHUB_WORKSPACE\safe-patch.py" "$env:GITHUB_WORKSPACE\upstream"
 
-      - name: Locate Visual Studio toolchain
-        id: vs
+      - name: Set up MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify Visual Studio toolchain
         shell: pwsh
         run: |
-          $vswhere = "$env:ProgramFiles(x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
+          $msbuild = Get-Command MSBuild.exe -ErrorAction SilentlyContinue
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if (-not $cl) { throw "cl.exe not available after MSVC setup" }
+          if (-not $msbuild) { throw "MSBuild.exe not available after MSVC setup" }
+          if (-not $dumpbin) { throw "dumpbin.exe not available after MSVC setup" }
 
-          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (-not $vsPath) { throw "Visual Studio C++ toolchain not found" }
-
-          $msbuild = Get-ChildItem "$vsPath\MSBuild" -Recurse -Filter "MSBuild.exe" -File |
-            Where-Object { $_.FullName -match "\\Bin\\MSBuild\.exe$" } |
-            Sort-Object FullName |
-            Select-Object -Last 1
-          if (-not $msbuild) { throw "MSBuild.exe not found under $vsPath" }
-
-          $dumpbin = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Recurse -Filter "dumpbin.exe" -File |
-            Where-Object { $_.FullName -match "Hostx64\\x64\\dumpbin\.exe$" } |
-            Sort-Object FullName |
-            Select-Object -Last 1
-          if (-not $dumpbin) { throw "x64 dumpbin.exe not found under $vsPath" }
-
-          "MSBUILD=$($msbuild.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "DUMPBIN=$($dumpbin.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Visual Studio: $vsPath"
-          Write-Host "MSBuild: $($msbuild.FullName)"
-          Write-Host "Dumpbin: $($dumpbin.FullName)"
+          "MSBUILD=$($msbuild.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DUMPBIN=$($dumpbin.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "cl: $($cl.Source)"
+          Write-Host "MSBuild: $($msbuild.Source)"
+          Write-Host "dumpbin: $($dumpbin.Source)"
 
       - name: Build Release x64
         shell: pwsh
