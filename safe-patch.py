@@ -1,3 +1,8 @@
+The error in the `safe-patch.py` script is due to an unterminated triple-quoted string literal. This issue occurs because the string replacement for `InjectKeys` and `InjectKey` is not properly terminated, leading to a syntax error. To fix this, you need to ensure that all triple-quoted string literals are correctly terminated.
+
+Here is the corrected version of the `safe-patch.py` script:
+
+```python
 from __future__ import annotations
 import pathlib, re, sys
 import ctypes
@@ -30,7 +35,7 @@ if '#include <cwchar>' not in app:
     app = app.replace('#include <memory>\n', '#include <cwchar>\n#include <memory>\n', 1)
 app = sub_once(
     app,
-    r'bool InjectKeys$$const int \*keys, std::size_t count, bool keyDown$$ noexcept \{.*?\n\}\n\nbool InjectKey$$int vk, bool keyDown$$ noexcept \{.*?\n\}',
+    r'bool InjectKeys\(const int \*keys, std::size_t count, bool keyDown\) noexcept \{.*?\n\}\n\nbool InjectKey\(int vk, bool keyDown\) noexcept \{.*?\n\}',
     '''bool ForegroundIsNotepad() noexcept {
   HWND foreground = GetForegroundWindow();
   if (!foreground) {
@@ -115,7 +120,7 @@ write('Application.cpp', app)
 hook = read('KbdHookBackend.cpp')
 hook = sub_once(
     hook,
-    r'bool KbdHookBackend::InjectKey$$uint16_t scanCode, uint16_t flags$$ noexcept \{.*?\n\}',
+    r'bool KbdHookBackend::InjectKey\(uint16_t scanCode, uint16_t flags\) noexcept \{.*?\n\}',
     '''bool KbdHookBackend::InjectKey(uint16_t scanCode, uint16_t flags) noexcept {
   // SAFE EDITION: deliberately no SendInput.
   (void)scanCode;
@@ -126,7 +131,7 @@ hook = sub_once(
 )
 hook = sub_once(
     hook,
-    r'  if $$instance_->callback_$$ \{\n    const bool suppress = instance_->callback_$$evt$$;\n    if $$suppress$$ \{\n      instance_->eventsDropped_\.fetch_add$$1, std::memory_order_relaxed$$;\n      return 1; // Suppress event from reaching the rest of OS hook chain\n    \}\n  \}',
+    r'  if \(instance_->callback_\) \{\n    const bool suppress = instance_->callback_\(evt\);\n    if \(suppress\) \{\n      instance_->eventsDropped_\.fetch_add\(1, std::memory_order_relaxed\);\n      return 1; // Suppress event from reaching the rest of OS hook chain\n    \}\n  \}',
     '''  if (instance_->callback_) {
     // SAFE EDITION: feed the original state/feature logic, but always allow
     // the user's physical key event to continue through Windows.
@@ -182,7 +187,7 @@ write('InterceptionBackend.cpp', interception_stub)
 gui = read('gui/GuiManager.cpp')
 gui = sub_once(
     gui,
-    r'  \{\n    // --- Cached interception availability check $$refresh once per second$$ ---.*?\n  \}\n\n  ImGui::PopStyleVar$$2$$;',
+    r'  \{\n    // --- Cached interception availability check \(refresh once per second\) ---.*?\n  \}\n\n  ImGui::PopStyleVar\(2\);',
     '''  {
     const ImVec4 safeColor(0.25f, 0.85f, 0.25f, 1.0f);
     ImGui::TextColored(safeColor, "[  OK  ]");
@@ -191,4 +196,21 @@ gui = sub_once(
     ImGui::Spacing();
 
     int backend = 0;
-    ImGui::
+    ImGui::RadioButton("WinHook + Notepad test", &backend, 0);
+    ImGui::SameLine();
+    ImGui::BeginDisabled();
+    ImGui::RadioButton("Interception", &backend, 1);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("  Injection works only while foreground app is notepad.exe; Interception is disabled.");
+  }
+
+  ImGui::PopStyleVar(2);''',
+    'GUI input backend panel',
+)
+write('gui/GuiManager.cpp', gui)
+
+# Make the console/log identity explicit without altering the visible title/layout.
+main = read('main.cpp')
+needle = ' + " starting...");'
+if needle not in main:
+    raise RuntimeError
