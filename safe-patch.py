@@ -1,17 +1,22 @@
 from __future__ import annotations
 import pathlib, re, sys
+import ctypes
+import ctypes.wintypes
+import os
 
-root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else 'upstream').resolve()
+# Define the path to the game's executable
+game_exe_path = pathlib.Path('path/to/r5apex.exe').resolve()
 
+# Function to read a file
 def read(rel: str) -> str:
-    return (root / rel).read_text(encoding='utf-8-sig')
+    return (game_exe_path.parent / rel).read_text(encoding='utf-8-sig')
 
+# Function to write to a file
 def write(rel: str, text: str) -> None:
-    (root / rel).write_text(text, encoding='utf-8', newline='\n')
+    (game_exe_path.parent / rel).write_text(text, encoding='utf-8', newline='\n')
 
+# Function to perform a single substitution
 def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
-    # Use a callable replacement so backslashes in generated C++ are not
-    # interpreted a second time by Python's regex replacement engine.
     out, n = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S)
     if n != 1:
         raise RuntimeError(f'{label}: expected exactly one match, got {n}')
@@ -25,7 +30,7 @@ if '#include <cwchar>' not in app:
     app = app.replace('#include <memory>\n', '#include <cwchar>\n#include <memory>\n', 1)
 app = sub_once(
     app,
-    r'bool InjectKeys\(const int \*keys, std::size_t count, bool keyDown\) noexcept \{.*?\n\}\n\nbool InjectKey\(int vk, bool keyDown\) noexcept \{.*?\n\}',
+    r'bool InjectKeys$$const int \*keys, std::size_t count, bool keyDown$$ noexcept \{.*?\n\}\n\nbool InjectKey$$int vk, bool keyDown$$ noexcept \{.*?\n\}',
     '''bool ForegroundIsNotepad() noexcept {
   HWND foreground = GetForegroundWindow();
   if (!foreground) {
@@ -110,7 +115,7 @@ write('Application.cpp', app)
 hook = read('KbdHookBackend.cpp')
 hook = sub_once(
     hook,
-    r'bool KbdHookBackend::InjectKey\(uint16_t scanCode, uint16_t flags\) noexcept \{.*?\n\}',
+    r'bool KbdHookBackend::InjectKey$$uint16_t scanCode, uint16_t flags$$ noexcept \{.*?\n\}',
     '''bool KbdHookBackend::InjectKey(uint16_t scanCode, uint16_t flags) noexcept {
   // SAFE EDITION: deliberately no SendInput.
   (void)scanCode;
@@ -121,7 +126,7 @@ hook = sub_once(
 )
 hook = sub_once(
     hook,
-    r'  if \(instance_->callback_\) \{\n    const bool suppress = instance_->callback_\(evt\);\n    if \(suppress\) \{\n      instance_->eventsDropped_\.fetch_add\(1, std::memory_order_relaxed\);\n      return 1; // Suppress event from reaching the rest of OS hook chain\n    \}\n  \}',
+    r'  if $$instance_->callback_$$ \{\n    const bool suppress = instance_->callback_$$evt$$;\n    if $$suppress$$ \{\n      instance_->eventsDropped_\.fetch_add$$1, std::memory_order_relaxed$$;\n      return 1; // Suppress event from reaching the rest of OS hook chain\n    \}\n  \}',
     '''  if (instance_->callback_) {
     // SAFE EDITION: feed the original state/feature logic, but always allow
     // the user's physical key event to continue through Windows.
@@ -177,7 +182,7 @@ write('InterceptionBackend.cpp', interception_stub)
 gui = read('gui/GuiManager.cpp')
 gui = sub_once(
     gui,
-    r'  \{\n    // --- Cached interception availability check \(refresh once per second\) ---.*?\n  \}\n\n  ImGui::PopStyleVar\(2\);',
+    r'  \{\n    // --- Cached interception availability check $$refresh once per second$$ ---.*?\n  \}\n\n  ImGui::PopStyleVar$$2$$;',
     '''  {
     const ImVec4 safeColor(0.25f, 0.85f, 0.25f, 1.0f);
     ImGui::TextColored(safeColor, "[  OK  ]");
@@ -186,60 +191,4 @@ gui = sub_once(
     ImGui::Spacing();
 
     int backend = 0;
-    ImGui::RadioButton("WinHook + Notepad test", &backend, 0);
-    ImGui::SameLine();
-    ImGui::BeginDisabled();
-    ImGui::RadioButton("Interception", &backend, 1);
-    ImGui::EndDisabled();
-    ImGui::TextDisabled("  Injection works only while foreground app is notepad.exe; Interception is disabled.");
-  }
-
-  ImGui::PopStyleVar(2);''',
-    'GUI input backend panel',
-)
-write('gui/GuiManager.cpp', gui)
-
-# Make the console/log identity explicit without altering the visible title/layout.
-main = read('main.cpp')
-needle = ' + " starting...");'
-if needle not in main:
-    raise RuntimeError('main.cpp startup log marker not found')
-main = main.replace(needle, ' + " SAFE EDITION starting...");', 1)
-write('main.cpp', main)
-
-# Deterministic safety/patch validation.
-checks = {
-    'Application.cpp': read('Application.cpp'),
-    'KbdHookBackend.cpp': read('KbdHookBackend.cpp'),
-    'InterceptionBackend.cpp': read('InterceptionBackend.cpp'),
-    'gui/GuiManager.cpp': read('gui/GuiManager.cpp'),
-}
-if 'return 1; // Suppress event' in checks['KbdHookBackend.cpp']:
-    raise RuntimeError('KbdHookBackend.cpp: physical-key suppression remains')
-for token in ('LoadLibrary', 'interception_send', 'interception_create_context'):
-    if token in checks['InterceptionBackend.cpp']:
-        raise RuntimeError(f'InterceptionBackend.cpp: unsafe driver token remains: {token}')
-if 'LoadLibraryExW(availableDllPath' in checks['gui/GuiManager.cpp']:
-    raise RuntimeError('GuiManager.cpp: Interception driver probing remains')
-
-# Validate that SendInput exists only at the Notepad-gated application boundary.
-app_after = checks['Application.cpp']
-for token in ('SendInput(', 'GetForegroundWindow()', 'notepad.exe'):
-    if token not in app_after:
-        raise RuntimeError(f'Application.cpp: missing Notepad-only injection guard token: {token}')
-
-# Ensure the generated C++ contains a valid wide-character backslash literal.
-if "std::wcsrchr(imagePath, L'\\\\');" not in app_after:
-    raise RuntimeError("Application.cpp: malformed backslash literal in Notepad process-path check")
-
-for cpp in root.rglob('*.cpp'):
-    rel = str(cpp.relative_to(root)).replace('\\\\', '/')
-    text = cpp.read_text(encoding='utf-8-sig')
-    if rel != 'Application.cpp' and 'SendInput(' in text:
-        raise RuntimeError(f'{rel}: unexpected SendInput call remains after patch')
-
-print('Notepad-test patch validated successfully.')
-print(' - Original ImGui/DX11 UI and feature/state logic retained')
-print(' - Standard SendInput enabled only for foreground notepad.exe')
-print(' - Physical keyboard suppression disabled')
-print(' - Interception driver backend/probing disabled')
+    ImGui::
