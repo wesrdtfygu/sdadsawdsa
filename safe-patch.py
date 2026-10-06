@@ -43,7 +43,7 @@ app = sub_once(
   }
 
   wchar_t imagePath[32768]{};
-  DWORD imagePathLength = static_cast<DWORD>(std::size(imagePath));
+  DWORD imagePathLength = static_cast<DWORD>(sizeof(imagePath) / sizeof(imagePath[0]));
   const bool queried =
       QueryFullProcessImageNameW(process, 0, imagePath, &imagePathLength) != 0;
   CloseHandle(process);
